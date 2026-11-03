@@ -80,6 +80,9 @@
          text-transform:uppercase;margin-bottom:11px}
   .tip{font-size:11.5px;color:var(--ink-3);line-height:1.7;margin-bottom:9px}
   .tip b{display:block;color:var(--ink-2);font-weight:600;font-size:12px;margin-bottom:1px}
+  .note2{margin-top:16px;padding-top:12px;border-top:1px dashed var(--line);
+         font-size:10.5px;line-height:1.7;color:var(--ink-3)}
+  .note2 b{color:var(--ink-2);font-weight:600}
 
   .rail{flex:none;display:flex;align-items:center;gap:0;padding:16px 22px 14px;border-bottom:1px solid var(--line)}
   .rnode{display:flex;align-items:center;gap:8px;flex:none}
@@ -113,7 +116,7 @@
   .step.act .sname{color:var(--amber)}
   .think{display:none;padding:2px 22px 14px 50px}
   .step.open .think{display:block}
-  .tk{display:flex;gap:10px;padding:3px 0;font-size:11px;line-height:1.7;animation:fin .3s ease}
+  .tk{display:flex;gap:10px;padding:3px 0;font-size:11px;line-height:1.7}
   .tk b{flex:none;width:30px;font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;
         color:var(--amber);font-weight:600;padding-top:3px}
   .tk span{color:var(--ink-2)}
@@ -231,6 +234,7 @@
           <div class="tip"><b>改任务描述</b>　右侧记忆召回会跟着变</div>
           <div class="tip"><b>把阈值拖到 90</b>　第一轮 85 分也不放过，继续重试</div>
           <div class="tip"><b>拖到 40</b>　一次通过，不触发重试</div>
+          <div class="note2">产物与评分由<b>本地规则引擎</b>生成，不调用任何模型</div>
         </div>
       </div>
     </div>
@@ -308,6 +312,118 @@
     "        for (Order o : list) { w.write(o.toCsv()); cursor = o.getId(); }",
     "        w.flush();","    }","}",FENCE,"","## 边界",
     "超过一万行分页写入并 flush；中途失败记录 cursor，重跑从断点继续。"].join(NL);
+
+
+  /* ---------------- 本地规则引擎：从任务文本生成产物 ---------------- */
+  var DOM=[
+    {k:["订单","导出","csv","excel"], n:"订单导出", ep:"/api/orders/export", rt:"text/csv", java:true},
+    {k:["用户","登录","注册","账号","角色"], n:"用户与权限", ep:"/api/users", rt:"application/json", java:true},
+    {k:["商品","检索","搜索","筛选"], n:"商品检索", ep:"/api/products/search", rt:"application/json", java:true},
+    {k:["支付","退款","对账","回调"], n:"支付回调", ep:"/api/payments/callback", rt:"application/json", java:true},
+    {k:["消息","通知","推送"], n:"消息推送", ep:"/api/messages/send", rt:"application/json", java:true},
+    {k:["前端","页面","交互","组件","界面"], n:"页面交互", ep:"view", rt:"", java:false}
+  ];
+
+  function analyze(task){
+    var t=task.toLowerCase(), dom=null, i;
+    for(i=0;i<DOM.length;i++){
+      for(var j=0;j<DOM[i].k.length;j++) if(t.indexOf(DOM[i].k[j])>=0){ dom=DOM[i]; break; }
+      if(dom) break;
+    }
+    if(!dom) dom={n:"通用功能", ep:"/api/feature", rt:"application/json", java:true};
+    var c=[];
+    if(/时间|区间|日期|范围/.test(t)) c.push("时间范围");
+    if(/万行|大文件|大量|批量|内存|溢出/.test(t)) c.push("数据量");
+    if(/并发|限流|性能|慢/.test(t)) c.push("并发");
+    if(/权限|鉴权|登录|角色/.test(t)) c.push("权限");
+    if(/异常|失败|重试|超时|断点/.test(t)) c.push("异常");
+    if(/分页|翻页/.test(t)) c.push("分页");
+    if(/校验|验证|格式/.test(t)) c.push("校验");
+    return {d:dom, c:c, short:task.length<24};
+  }
+
+  function generate(an, level){
+    var d=an.d, L=[], c=an.c;
+    var hasBig  = c.indexOf("数据量")>=0;
+    var hasPage = c.indexOf("分页")>=0 || hasBig;
+    var hasTime = c.indexOf("时间范围")>=0;
+    var hasAuth = c.indexOf("权限")>=0;
+    var hasErr  = c.indexOf("异常")>=0;
+
+    if(level===1){
+      /* 第 1 轮：朴素实现 —— 单章节、无边界、代码块被截断 */
+      L.push("## 方案");
+      L.push("采用 Spring Boot 实现"+d.n+"，"+(hasPage?"按分页查询":"直接查询")+
+             "，返回"+d.rt+"。");
+      L.push("");
+      if(d.java){
+        L.push(FENCE+"java");
+        L.push("public void handle("+(hasPage?"int page":"")+") {");
+        L.push("    List<Row> list = repo."+(hasPage?"page(page, 1000)":"findAll()")+";");
+        L.push("    for (Row r : list) {");
+        L.push("        write(r);");
+        L.push("    }");
+      }else{
+        L.push(FENCE+"ts");
+        L.push("export function use" + d.n.replace(/[^\u4e00-\u9fa5]/g,"") + "() {");
+        L.push("  const [list, setList] = useState([]);");
+        L.push("  useEffect(() => { fetch('"+d.ep+"').then(r => r.json()).then(setList); }, []);");
+      }
+      /* 故意不闭合代码块：模拟生成被截断 */
+      return L.join(NL);
+    }
+
+    /* 第 2 轮：补全 —— 多章节、闭合、补边界 */
+    L.push("## 方案");
+    L.push("采用 Spring Boot 实现"+d.n+"，"+
+      (hasPage?"按游标分页读取":"一次性读取")+"，"+
+      (hasBig?"逐批流式写出，内存占用与总行数无关":"按请求返回")+"。");
+    L.push("");
+    L.push("## 接口");
+    L.push("GET "+d.ep+" 返回 "+d.rt+"。"+
+      (hasTime?"请求参数包含起止时间，前端传本地时区，后端统一转 UTC 后查询。":"")+
+      (hasAuth?"该接口单独鉴权，不复用列表接口的权限位。":""));
+    L.push("");
+    L.push("## 实现");
+    if(d.java){
+      L.push(FENCE+"java");
+      L.push("public void handle("+(hasTime?"LocalDateTime from, LocalDateTime to, ":"")+
+             "Writer w) throws IOException {");
+      if(hasPage){
+        L.push("    long cursor = 0;");
+        L.push("    while (true) {");
+        L.push("        List<Row> list = repo.next("+(hasTime?"from, to, ":"")+"cursor, 1000);");
+        L.push("        if (list.isEmpty()) break;");
+        L.push("        for (Row r : list) { w.write(r.toLine()); cursor = r.getId(); }");
+        L.push("        w.flush();");
+        L.push("    }");
+      }else{
+        L.push("    List<Row> list = repo.find"+(hasTime?"ByTime(from, to)":"All")+"();");
+        L.push("    for (Row r : list) w.write(r.toLine());");
+      }
+      L.push("}");
+      L.push(FENCE);
+    }else{
+      L.push(FENCE+"tsx");
+      L.push("export function " + "View" + "() {");
+      L.push("  const { data, error, isLoading } = useQuery('"+d.ep+"', fetcher);");
+      L.push("  if (isLoading) return <Skeleton />;");
+      L.push("  if (error) return <ErrorState onRetry={refetch} />;");
+      L.push("  return <List items={data} />;");
+      L.push("}");
+      L.push(FENCE);
+    }
+    L.push("");
+    L.push("## 边界");
+    var b=[];
+    if(hasBig) b.push("超过一万行分页写入并逐批 flush");
+    if(hasErr) b.push("中途失败记录断点，重跑从断点继续");
+    if(hasAuth) b.push("鉴权失败直接返回 401，不进入业务逻辑");
+    if(hasTime) b.push("时间区间为空时按最近 7 天兜底");
+    if(!b.length) b.push("输入为空或参数非法时返回 400，并给出字段级错误信息");
+    L.push(b.join("；")+"。");
+    return L.join(NL);
+  }
 
   var $=function(id){return document.getElementById(id)};
   var rail=$("rail"), stepsEl=$("steps"), abody=$("abody"), aCnt=$("aCnt");
@@ -503,33 +619,35 @@
     document.querySelectorAll(".tab").forEach(function(x){x.classList.toggle("on",x.dataset.tab==="out")});
 
     var task=$("task").value, hits=recall(task);
+    var an=analyze(task), OUT1=generate(an,1), OUT2=generate(an,2);
     renderMem(hits);
 
-    if(!await stage(0,"拆成 4 个可交付项",[
-      ["观察","需求里有三个硬约束：按时间区间筛选、导出行数未知、内存不能随行数增长"],
-      ["权衡","先全量读出再写文件？实现最快，但十万行必然爆内存 —— 直接排除"],
-      ["结论","拆成四块：接口契约 / 分页策略 / 时间处理 / 异常边界"]
+    if(!await stage(0,(an.short?"信息不足":"拆成 4 个可交付项"),[
+      ["观察","识别到 "+(an.c.length?an.c.join(" / "):"无显式约束")+"；领域判定为「"+an.d.n+"」"],
+      ["权衡","先全量读出再写文件？实现最快，但数据量一大必然爆内存 —— 直接排除"],
+      ["结论",an.c.length?("按 "+an.c.join("、")+" 四条线拆解，缺的当成风险项"):"需求信息偏少，按通用骨架拆解，边界待补"]
     ])) return;
 
-    if(!await stage(1,"游标分页 · 单独鉴权",[
-      ["观察", hits.length
-        ? "命中 "+hits.length+" 条历史经验；现有列表接口用的是 LIMIT OFFSET"
-        : "未命中历史经验；现有列表接口用的是 LIMIT OFFSET"],
-      ["权衡","OFFSET 深翻页会越翻越慢，第一万页要扫过前一万页；改游标分页的代价是不能跳页 —— 导出不需要跳页"],
-      ["结论","GET /api/orders/export，游标 + 流式写出；导出口单独鉴权，不复用列表权限位"]
+    if(!await stage(1,"定接口 " + an.d.ep,[
+      ["观察",(hits.length?"命中 "+hits.length+" 条历史经验；":"未命中历史经验；")+
+              "目标接口 "+an.d.ep+"，返回 "+an.d.rt],
+      ["权衡","分页用 OFFSET 还是游标？OFFSET 深翻页越翻越慢，游标不能跳页 —— 这个场景不需要跳页"],
+      ["结论","GET "+an.d.ep+"；"+
+              (an.c.indexOf("权限")>=0?"单独鉴权，不复用列表权限位":"复用现有鉴权")+"；"+
+              (an.c.indexOf("数据量")>=0?"逐批流式写出":"一次性返回")]
     ])) return;
 
-    if(!await stage(2,"生成 Controller + Service",[
-      ["输入","契约：单接口返回 text/csv；策略：游标分批，每批 1000 条"],
-      ["生成","OrderExportController / OrderExportService"],
-      ["注意","CSV 需先写 UTF-8 BOM，否则 Excel 打开中文乱码"]
+    if(!await stage(2,"按契约生成实现",[
+      ["输入","接口 "+an.d.ep+"，返回 "+an.d.rt+"；策略由上一阶段决定"],
+      ["生成","控制器 + 服务类，含参数校验与空值处理"],
+      ["注意",an.d.java?"CSV 需先写 UTF-8 BOM，否则 Excel 打开中文乱码":"异常态要有 loading / error / empty 三态"]
     ])) return;
-    renderOut(OUT_1);
+    renderOut(OUT1);
 
     railState(3,"act"); stepState(3,"act"); setSum(3,"门禁校验中");
     await think(3,[["校验","第 1 轮产物：代码块闭合 / 章节数 / 语言比例 / 长度 / 边界说明"]],220);
     if(aborted) return;
-    var th=+thEl.value, s1=judge(OUT_1,th), sFinal=s1;
+    var th=+thEl.value, s1=judge(OUT1,th), sFinal=s1;
     attemptsEl.textContent="attempt 1 / 2";
 
     if(s1<th){
@@ -540,10 +658,10 @@
       ],260);
       if(aborted) return;
       await sleep(320);
-      sFinal=judge(OUT_2,th);
+      sFinal=judge(OUT2,th);
       attemptsEl.textContent="attempt 2 / 2";
-      diffData=diff(OUT_1,OUT_2);
-      renderOut(OUT_2);
+      diffData=diff(OUT1,OUT2);
+      renderOut(OUT2);
       document.querySelectorAll(".tab").forEach(function(x){x.classList.toggle("on",x.dataset.tab==="diff")});
       curTab="diff"; renderDiff();
       await think(3,[["结果","第 2 轮得分 "+sFinal+"，通过门禁；已切到「差异」逐行对比"]],240);
