@@ -94,28 +94,36 @@
   .rline i{position:absolute;inset:0;width:0;background:var(--green);transition:width .5s}
 
   /* 步骤 */
-  .steps{flex:none;overflow-y:auto;max-height:236px}
+  .steps{flex:1;min-height:0;overflow-y:auto}
   .step{border-bottom:1px solid var(--line)}
-  .srow{display:flex;align-items:center;gap:12px;padding:11px 22px}
+  .srow{display:flex;align-items:center;gap:12px;padding:10px 22px;cursor:pointer;user-select:none}
+  .srow:hover .sname{color:var(--ink)}
+  .ssum{font-size:11.5px;color:var(--ink-3);flex:1;text-align:right;padding-right:4px;
+        white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .step.open .ssum{color:var(--ink-3)}
+  .chev{width:12px;height:12px;flex:none;color:var(--ink-3);transition:transform .22s}
+  .step.open .chev{transform:rotate(90deg);color:var(--amber)}
   .sn{font-family:var(--mono);font-size:10px;color:var(--ink-3);width:16px;flex:none}
   .sname{font-weight:600;font-size:12.5px;flex:none}
-  .stag{font-family:var(--mono);font-size:9.5px;color:var(--ink-3);flex:1;letter-spacing:.1em;
-        text-transform:uppercase}
+  .stag{font-family:var(--mono);font-size:9.5px;color:var(--ink-3);flex:none;letter-spacing:.1em;
+        text-transform:uppercase;width:78px}
   .sdot{width:7px;height:7px;border-radius:50%;background:var(--line-2);flex:none;transition:.3s}
   .step.act .sdot{background:var(--amber);box-shadow:0 0 0 3px rgba(224,169,74,.14)}
   .step.ok .sdot{background:var(--green)}
   .step.act .sname{color:var(--amber)}
-  .log{display:none;padding:0 22px 12px 50px;font-family:var(--mono);font-size:10.5px;
-       line-height:1.8;color:var(--ink-2)}
-  .step.act .log{display:block}
-  .log div{animation:fin .25s ease;white-space:pre-wrap}
+  .think{display:none;padding:2px 22px 14px 50px}
+  .step.open .think{display:block}
+  .tk{display:flex;gap:10px;padding:3px 0;font-size:11px;line-height:1.7;animation:fin .3s ease}
+  .tk b{flex:none;width:30px;font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;
+        color:var(--amber);font-weight:600;padding-top:3px}
+  .tk span{color:var(--ink-2)}
   @keyframes fin{from{opacity:0}to{opacity:1}}
   .log .k{color:var(--blue)} .log .g{color:var(--green)} .log .a{color:var(--amber)} .log .r{color:var(--red)}
   .cur::after{content:"▌";color:var(--amber);animation:bl 1s steps(2) infinite}
   @keyframes bl{50%{opacity:0}}
 
   /* 产物面板 */
-  .artifact{flex:1;min-height:0;display:flex;flex-direction:column;border-top:1px solid var(--line);background:var(--bg-2)}
+  .artifact{flex:none;height:284px;display:flex;flex-direction:column;border-top:1px solid var(--line);background:var(--bg-2)}
   .ahead{flex:none;display:flex;align-items:center;gap:2px;padding:10px 22px 0}
   .tab{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;
        color:var(--ink-3);padding:6px 12px;border-radius:6px 6px 0 0;cursor:pointer;transition:.2s}
@@ -346,24 +354,41 @@
       d.className="step"; d.id="step"+i;
       d.innerHTML='<div class="srow"><span class="sdot"></span><span class="sn">'+("0"+(i+1)).slice(-2)+
         '</span><span class="sname">'+s.n+'</span><span class="stag">'+s.t+
-        '</span></div><div class="log" id="log'+i+'"></div>';
+        '</span><span class="ssum" id="sum'+i+'"></span>'+
+        '<svg class="chev" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6">'+
+        '<path d="M4 2l4 4-4 4" stroke-linecap="round" stroke-linejoin="round"/></svg>'+
+        '</div><div class="think" id="think'+i+'"></div>';
+      d.querySelector(".srow").onclick=function(){ d.classList.toggle("open"); };
       stepsEl.appendChild(d);
     });
   }
   function stepState(i,cls){
     var el=$("step"+i); if(!el) return;
     el.classList.remove("act","ok"); if(cls) el.classList.add(cls);
+    if(cls==="act"){
+      el.classList.add("open");
+      if(el.scrollIntoView) el.scrollIntoView({block:"nearest",behavior:"smooth"});
+    }
   }
-  async function typeLog(i,lines,speed){
-    var box=$("log"+i);
-    for(var k=0;k<lines.length;k++){
+  function setSum(i,txt){ var e=$("sum"+i); if(e) e.textContent=txt; }
+  async function think(i,rows,speed){
+    var box=$("think"+i);
+    for(var k=0;k<rows.length;k++){
       if(aborted) return;
       var d=document.createElement("div");
-      d.className="cur"; d.innerHTML=lines[k];
-      box.appendChild(d); box.scrollTop=box.scrollHeight;
-      await sleep(speed||200);
-      d.classList.remove("cur");
+      d.className="tk";
+      d.innerHTML="<b>"+rows[k][0]+"</b><span>"+rows[k][1]+"</span>";
+      box.appendChild(d);
+      if(box.scrollIntoView) box.scrollIntoView({block:"nearest"});
+      await sleep(speed||240);
     }
+  }
+  async function stage(i,sum,rows,speed){
+    railState(i,"act"); stepState(i,"act"); setSum(i,sum);
+    await think(i,rows,speed||240);
+    if(aborted) return false;
+    railState(i,"ok"); stepState(i,"ok");
+    return true;
   }
 
   /* 差异（LCS） */
@@ -469,66 +494,75 @@
     $("btnRun").disabled=true; $("btnReset").disabled=true;
     buildRail(); buildSteps();
     scoreEl.textContent="—"; scoreEl.style.color="var(--ink-3)";
-    ringFg.style.strokeDashoffset=D; verdict.textContent="未执行"; verdict.style.color="var(--ink-2)";
+    ringFg.style.strokeDashoffset=D; ringFg.style.stroke="#5f6b7a";
+    verdict.textContent="未执行"; verdict.style.color="var(--ink-2)";
     attemptsEl.textContent="attempt —";
     rulesEl.innerHTML='<div class="empty">运行后显示扣分明细</div>';
     abody.innerHTML='<div class="ph">运行后在这里查看产物</div>'; aCnt.textContent="—";
-    curTab="out"; document.querySelectorAll(".tab").forEach(function(x){x.classList.toggle("on",x.dataset.tab==="out")});
+    curTab="out";
+    document.querySelectorAll(".tab").forEach(function(x){x.classList.toggle("on",x.dataset.tab==="out")});
 
     var task=$("task").value, hits=recall(task);
     renderMem(hits);
 
-    railState(0,"act"); stepState(0,"act");
-    await typeLog(0,['<span class="k">input</span>  '+task.slice(0,28)+'…',
-      '拆解为 4 个可交付项：接口契约 / 分页策略 / 时间处理 / 异常边界',
-      '<span class="g">done</span>  4 项 · 预计改动 3 个文件'],220);
-    if(aborted) return; railState(0,"ok"); stepState(0,"ok");
+    if(!await stage(0,"拆成 4 个可交付项",[
+      ["观察","需求里有三个硬约束：按时间区间筛选、导出行数未知、内存不能随行数增长"],
+      ["权衡","先全量读出再写文件？实现最快，但十万行必然爆内存 —— 直接排除"],
+      ["结论","拆成四块：接口契约 / 分页策略 / 时间处理 / 异常边界"]
+    ])) return;
 
-    railState(1,"act"); stepState(1,"act");
-    await typeLog(1,[
-      hits.length ? '<span class="a">recall</span>  命中 '+hits.length+' 条经验（最高 '+hits[0].s.toFixed(1)+'）'
-                  : '<span class="r">recall</span>  未命中历史经验，按默认策略生成',
-      '契约：GET /api/orders/export  →  text/csv',
-      '<span class="k">note</span>  导出类接口单独鉴权'],200);
-    if(aborted) return; railState(1,"ok"); stepState(1,"ok");
+    if(!await stage(1,"游标分页 · 单独鉴权",[
+      ["观察", hits.length
+        ? "命中 "+hits.length+" 条历史经验；现有列表接口用的是 LIMIT OFFSET"
+        : "未命中历史经验；现有列表接口用的是 LIMIT OFFSET"],
+      ["权衡","OFFSET 深翻页会越翻越慢，第一万页要扫过前一万页；改游标分页的代价是不能跳页 —— 导出不需要跳页"],
+      ["结论","GET /api/orders/export，游标 + 流式写出；导出口单独鉴权，不复用列表权限位"]
+    ])) return;
 
-    railState(2,"act"); stepState(2,"act");
-    await typeLog(2,['<span class="k">write</span>  OrderExportController.java',
-      '<span class="k">write</span>  OrderExportService.java'],240);
+    if(!await stage(2,"生成 Controller + Service",[
+      ["输入","契约：单接口返回 text/csv；策略：游标分批，每批 1000 条"],
+      ["生成","OrderExportController / OrderExportService"],
+      ["注意","CSV 需先写 UTF-8 BOM，否则 Excel 打开中文乱码"]
+    ])) return;
+    renderOut(OUT_1);
+
+    railState(3,"act"); stepState(3,"act"); setSum(3,"门禁校验中");
+    await think(3,[["校验","第 1 轮产物：代码块闭合 / 章节数 / 语言比例 / 长度 / 边界说明"]],220);
     if(aborted) return;
-    renderOut(OUT_1); railState(2,"ok"); stepState(2,"ok");
-
-    railState(3,"act"); stepState(3,"act");
-    await typeLog(3,['<span class="k">gate</span>  第 1 轮产物校验'],200);
-    if(aborted) return;
-    var th=+thEl.value, s1=judge(OUT_1,th);
+    var th=+thEl.value, s1=judge(OUT_1,th), sFinal=s1;
     attemptsEl.textContent="attempt 1 / 2";
 
     if(s1<th){
-      await typeLog(3,['<span class="r">fail</span>  得分 '+s1+' 低于阈值 '+th+'，带修复指令重试',
-        '<span class="k">fix</span>   补全代码块闭合 / 增加章节 / 补边界说明'],260);
+      await think(3,[
+        ["判定","得分 "+s1+" 低于阈值 "+th+"，扣分集中在完整性，而非正确性"],
+        ["判断","这类问题可自动修复，不需要人介入 —— 进入重试"],
+        ["修复","补全代码块闭合 / 章节扩到 5 节 / 补边界说明"]
+      ],260);
       if(aborted) return;
       await sleep(320);
-      var s2=judge(OUT_2,th);
+      sFinal=judge(OUT_2,th);
       attemptsEl.textContent="attempt 2 / 2";
       diffData=diff(OUT_1,OUT_2);
       renderOut(OUT_2);
       document.querySelectorAll(".tab").forEach(function(x){x.classList.toggle("on",x.dataset.tab==="diff")});
       curTab="diff"; renderDiff();
-      await typeLog(3,['<span class="g">pass</span>  第 2 轮得分 '+s2+'，通过门禁','<span class="k">view</span>  已切到「差异」，可逐行查看改动'],240);
+      await think(3,[["结果","第 2 轮得分 "+sFinal+"，通过门禁；已切到「差异」逐行对比"]],240);
       if(aborted) return;
+      setSum(3,"门禁 "+s1+" → "+sFinal+" · 重试 1 次");
     }else{
-      await typeLog(3,['<span class="g">pass</span>  得分 '+s1+'，一次通过'],240);
+      await think(3,[["结果","得分 "+s1+"，一次通过，未触发重试"]],220);
+      setSum(3,"门禁 "+s1+" · 一次通过");
     }
     railState(3,"ok"); stepState(3,"ok");
 
-    railState(4,"act"); stepState(4,"act");
-    await typeLog(4,['<span class="k">pack</span>  ARCHITECTURE.md · API.md · CHANGELOG.md',
-      '<span class="g">ok</span>    产物已就绪'],200);
-    if(aborted) return; railState(4,"ok"); stepState(4,"ok");
+    if(!await stage(4,"打包 3 份产物",[
+      ["汇总","ARCHITECTURE.md / API.md / CHANGELOG.md"],
+      ["说明","产物与门禁明细均保留，改动可逐行查看"]
+    ])) return;
 
     running=false; setSt("已完成","ok"); clearInterval(timer); elapsedEl.textContent=now();
     $("btnRun").disabled=false; $("btnReset").disabled=false;
+    stepsEl.scrollTop=0;
   }
 
   $("btnRun").onclick=run;
