@@ -4,12 +4,13 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>AgentForge · 工程流水线控制台</title>
-<meta name="description" content="规划 → 架构 → 编码 → 校验 → 产物导出。一个可离线运行的工程流水线控制台，含规则化质量门禁与经验召回。" />
+<meta name="description" content="需求 → 规划 → 架构 → 编码 → 门禁 → 产物。质量门禁按规则扣分，不达标自动重试，产物差异逐行可见。" />
 <style>
   :root{
-    --bg:#0f1216; --panel:#151a20; --panel-2:#1a2029; --line:#242c36; --line-2:#2e3844;
-    --ink:#e3e9ef; --ink-2:#9aa7b5; --ink-3:#67717e;
-    --amber:#d9a441; --green:#4ca37a; --red:#c9584f; --blue:#5b8fb9;
+    --bg:#0b0d11; --bg-2:#0f1217; --panel:#12161c; --panel-2:#171c24; --raise:#1c222b;
+    --line:#232a34; --line-2:#2e3742;
+    --ink:#e8edf3; --ink-2:#98a5b4; --ink-3:#5f6b7a;
+    --amber:#e0a94a; --amber-d:#b8853a; --green:#4da97e; --red:#cc5a50; --blue:#5f93c0;
     --mono:ui-monospace,SFMono-Regular,"JetBrains Mono",Menlo,Consolas,monospace;
     --sans:"PingFang SC","HarmonyOS Sans SC","Hiragino Sans GB","Microsoft YaHei",-apple-system,system-ui,sans-serif;
   }
@@ -17,114 +18,182 @@
   html,body{height:100%}
   body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:13px;line-height:1.6;
        -webkit-font-smoothing:antialiased;overflow:hidden}
-  .app{height:100vh;display:flex;flex-direction:column}
-  .top{flex:none;height:52px;display:flex;align-items:center;gap:14px;padding:0 20px;
-       border-bottom:1px solid var(--line);background:var(--panel)}
-  .logo{display:flex;align-items:center;gap:9px;font-weight:700;letter-spacing:.02em}
-  .logo .m{width:24px;height:24px;border-radius:6px;background:var(--amber);
-           display:grid;place-items:center;color:#1a1206;font-size:11px;font-weight:800;font-family:var(--mono)}
-  .logo small{display:block;font-family:var(--mono);font-size:9px;letter-spacing:.18em;color:var(--ink-3);font-weight:600;margin-top:-3px}
+  body::before{content:"";position:fixed;inset:0;pointer-events:none;
+    background:radial-gradient(900px 420px at 78% -10%, rgba(224,169,74,.10), transparent 62%),
+               radial-gradient(700px 380px at 10% 108%, rgba(95,147,192,.08), transparent 60%)}
+  .app{position:relative;height:100vh;display:flex;flex-direction:column}
+
+  /* 顶栏 */
+  .top{flex:none;height:60px;display:flex;align-items:center;gap:16px;padding:0 22px;
+       border-bottom:1px solid var(--line);background:rgba(18,22,28,.72);backdrop-filter:blur(10px)}
+  .logo{display:flex;align-items:center;gap:11px}
+  .mark{width:30px;height:30px;flex:none;filter:drop-shadow(0 4px 10px rgba(224,169,74,.28))}
+  .logo .nm{font-weight:700;font-size:14.5px;letter-spacing:.01em;line-height:1}
+  .logo .sb{display:block;font-family:var(--mono);font-size:8.5px;letter-spacing:.26em;
+            color:var(--ink-3);font-weight:600;margin-top:5px}
   .top .sp{flex:1}
-  .meta{display:flex;gap:18px;font-family:var(--mono);font-size:10.5px;color:var(--ink-3);letter-spacing:.04em}
+  .meta{display:flex;align-items:center;gap:20px;font-family:var(--mono);font-size:10.5px;
+        color:var(--ink-3);letter-spacing:.06em}
   .meta b{color:var(--ink-2);font-weight:600}
-  .dot{width:7px;height:7px;border-radius:50%;background:var(--green);display:inline-block;
-       margin-right:6px;box-shadow:0 0 0 3px rgba(76,163,122,.14)}
-  .dot.idle{background:var(--ink-3);box-shadow:0 0 0 3px rgba(103,113,126,.14)}
-  .dot.run{background:var(--amber);box-shadow:0 0 0 3px rgba(217,164,65,.16);animation:pulse 1.2s infinite}
-  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
-  .main{flex:1;display:grid;grid-template-columns:300px 1fr 330px;min-height:0}
+  .st{display:inline-flex;align-items:center;gap:7px;font-size:11px;font-weight:600;color:var(--ink-2)}
+  .st i{width:7px;height:7px;border-radius:50%;background:var(--ink-3);display:block}
+  .st.on i{background:var(--amber);box-shadow:0 0 0 3px rgba(224,169,74,.16);animation:pl 1.2s infinite}
+  .st.ok i{background:var(--green);box-shadow:0 0 0 3px rgba(77,169,126,.16)}
+  @keyframes pl{50%{opacity:.3}}
+
+  /* 主区 */
+  .main{flex:1;display:grid;grid-template-columns:286px 1fr 336px;min-height:0}
   .col{min-height:0;display:flex;flex-direction:column;border-right:1px solid var(--line)}
   .col:last-child{border-right:0}
-  .hd{flex:none;padding:11px 16px;border-bottom:1px solid var(--line);
-      font-family:var(--mono);font-size:10px;letter-spacing:.18em;color:var(--ink-3);
-      text-transform:uppercase;display:flex;justify-content:space-between;align-items:center}
-  .hd em{font-style:normal;color:var(--ink-2);letter-spacing:0}
-  .pad{padding:14px 16px;overflow-y:auto;flex:1}
-  .lab{font-family:var(--mono);font-size:10px;letter-spacing:.12em;color:var(--ink-3);margin:14px 0 6px}
+  .cap{flex:none;padding:12px 18px 10px;font-family:var(--mono);font-size:9.5px;letter-spacing:.2em;
+       color:var(--ink-3);text-transform:uppercase;display:flex;justify-content:space-between}
+  .cap em{font-style:normal;color:var(--ink-2)}
+
+  .pad{padding:0 18px 16px;overflow-y:auto;flex:1}
+  .lab{font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;color:var(--ink-3);margin:16px 0 7px}
   .lab:first-child{margin-top:0}
-  textarea{width:100%;height:92px;resize:none;background:var(--panel-2);border:1px solid var(--line-2);
-           border-radius:6px;color:var(--ink);font-family:var(--sans);font-size:12.5px;padding:9px 10px;
-           line-height:1.6;outline:none;transition:border-color .2s}
-  textarea:focus{border-color:var(--amber)}
-  select{width:100%;background:var(--panel-2);border:1px solid var(--line-2);border-radius:6px;
-         color:var(--ink);font-family:var(--sans);font-size:12.5px;padding:8px 10px;outline:none}
-  .rowv{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px}
+  textarea{width:100%;height:86px;resize:none;background:var(--panel-2);border:1px solid var(--line-2);
+           border-radius:8px;color:var(--ink);font-family:var(--sans);font-size:12.5px;padding:10px 11px;
+           line-height:1.62;outline:none;transition:.2s}
+  textarea:focus{border-color:var(--amber-d);background:#1a2029}
+  select{width:100%;background:var(--panel-2);border:1px solid var(--line-2);border-radius:8px;
+         color:var(--ink);font-family:var(--sans);font-size:12.5px;padding:9px 11px;outline:none}
+  .rowv{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}
   .rowv span{font-family:var(--mono);font-size:11px;color:var(--ink-2)}
+  .rowv b{font-family:var(--mono);font-size:13px;color:var(--amber);font-weight:600}
   input[type=range]{-webkit-appearance:none;width:100%;height:3px;border-radius:3px;background:var(--line-2);outline:0}
-  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;
-         background:var(--amber);cursor:pointer;border:2px solid var(--panel-2)}
-  .btns{display:flex;flex-direction:column;gap:8px;margin-top:18px}
-  button{font-family:var(--sans);font-size:12.5px;border-radius:6px;padding:9px 12px;cursor:pointer;
-         border:1px solid var(--line-2);background:var(--panel-2);color:var(--ink);transition:.16s}
-  button:hover{border-color:var(--ink-3);background:#20272f}
-  button:disabled{opacity:.35;cursor:default}
-  button.pri{background:var(--amber);border-color:var(--amber);color:#1a1206;font-weight:700}
-  button.pri:hover{background:#e6b355;border-color:#e6b355}
-  .steps{flex:1;overflow-y:auto;padding:8px 0}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;
+       background:var(--amber);cursor:pointer;border:3px solid #12161c;box-shadow:0 0 0 1px var(--amber-d)}
+  .btns{display:flex;flex-direction:column;gap:9px;margin-top:20px}
+  button{font-family:var(--sans);font-size:12.5px;border-radius:8px;padding:10px 12px;cursor:pointer;
+         border:1px solid var(--line-2);background:var(--panel-2);color:var(--ink);transition:.16s;font-weight:500}
+  button:hover{border-color:var(--ink-3);background:var(--raise)}
+  button:disabled{opacity:.32;cursor:default}
+  button.pri{background:linear-gradient(180deg,#e8b356,#d59f3d);border-color:#c99433;color:#1a1206;font-weight:700;
+             box-shadow:0 6px 18px -10px rgba(224,169,74,.9)}
+  button.pri:hover{background:linear-gradient(180deg,#f0bd62,#dfa945)}
+  button.pri:disabled{background:var(--panel-2);color:var(--ink);border-color:var(--line-2);box-shadow:none}
+
+  /* 轨道 */
+  .tips{margin-top:24px;padding-top:16px;border-top:1px solid var(--line)}
+  .tip-t{font-family:var(--mono);font-size:9.5px;letter-spacing:.2em;color:var(--ink-3);
+         text-transform:uppercase;margin-bottom:11px}
+  .tip{font-size:11.5px;color:var(--ink-3);line-height:1.7;margin-bottom:9px}
+  .tip b{display:block;color:var(--ink-2);font-weight:600;font-size:12px;margin-bottom:1px}
+
+  .rail{flex:none;display:flex;align-items:center;gap:0;padding:16px 22px 14px;border-bottom:1px solid var(--line)}
+  .rnode{display:flex;align-items:center;gap:8px;flex:none}
+  .rdot{width:9px;height:9px;border-radius:50%;background:var(--line-2);transition:.35s;flex:none}
+  .rlabel{font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--ink-3);transition:.3s;
+          text-transform:uppercase;white-space:nowrap}
+  .rnode.act .rdot{background:var(--amber);box-shadow:0 0 0 4px rgba(224,169,74,.15)}
+  .rnode.act .rlabel{color:var(--amber)}
+  .rnode.ok .rdot{background:var(--green)}
+  .rnode.ok .rlabel{color:var(--ink-2)}
+  .rline{flex:1;height:1px;background:var(--line-2);margin:0 12px;position:relative;overflow:hidden}
+  .rline i{position:absolute;inset:0;width:0;background:var(--green);transition:width .5s}
+
+  /* 步骤 */
+  .steps{flex:none;overflow-y:auto;max-height:236px}
   .step{border-bottom:1px solid var(--line)}
-  .srow{display:flex;align-items:center;gap:11px;padding:12px 18px}
-  .sn{font-family:var(--mono);font-size:10.5px;color:var(--ink-3);width:18px;flex:none}
-  .sname{font-weight:600;font-size:13px;flex:none}
-  .stag{font-family:var(--mono);font-size:10px;color:var(--ink-3);flex:1;text-align:right;
-        letter-spacing:.08em;text-transform:uppercase}
-  .sbar{width:44px;height:3px;border-radius:2px;background:var(--line-2);overflow:hidden;flex:none}
-  .sbar i{display:block;height:100%;width:0;background:var(--amber);transition:width .4s}
-  .sdot{width:8px;height:8px;border-radius:50%;background:var(--line-2);flex:none;transition:.3s}
-  .step.act .sdot{background:var(--amber);box-shadow:0 0 0 3px rgba(217,164,65,.15)}
-  .step.ok .sdot{background:var(--green);box-shadow:0 0 0 3px rgba(76,163,122,.15)}
-  .step.err .sdot{background:var(--red);box-shadow:0 0 0 3px rgba(201,88,79,.15)}
+  .srow{display:flex;align-items:center;gap:12px;padding:11px 22px}
+  .sn{font-family:var(--mono);font-size:10px;color:var(--ink-3);width:16px;flex:none}
+  .sname{font-weight:600;font-size:12.5px;flex:none}
+  .stag{font-family:var(--mono);font-size:9.5px;color:var(--ink-3);flex:1;letter-spacing:.1em;
+        text-transform:uppercase}
+  .sdot{width:7px;height:7px;border-radius:50%;background:var(--line-2);flex:none;transition:.3s}
+  .step.act .sdot{background:var(--amber);box-shadow:0 0 0 3px rgba(224,169,74,.14)}
+  .step.ok .sdot{background:var(--green)}
   .step.act .sname{color:var(--amber)}
-  .log{display:none;padding:0 18px 14px 47px;font-family:var(--mono);font-size:11px;
-       line-height:1.85;color:var(--ink-2)}
-  .step.act .log,.step.ok .log,.step.err .log{display:block}
-  .log div{white-space:pre-wrap;animation:fin .25s ease}
-  @keyframes fin{from{opacity:0;transform:translateY(-2px)}to{opacity:1;transform:none}}
-  .log .k{color:var(--blue)}
-  .log .g{color:var(--green)}
-  .log .a{color:var(--amber)}
-  .log .r{color:var(--red)}
-  .cursor::after{content:"▌";color:var(--amber);animation:bl 1s steps(2) infinite}
+  .log{display:none;padding:0 22px 12px 50px;font-family:var(--mono);font-size:10.5px;
+       line-height:1.8;color:var(--ink-2)}
+  .step.act .log{display:block}
+  .log div{animation:fin .25s ease;white-space:pre-wrap}
+  @keyframes fin{from{opacity:0}to{opacity:1}}
+  .log .k{color:var(--blue)} .log .g{color:var(--green)} .log .a{color:var(--amber)} .log .r{color:var(--red)}
+  .cur::after{content:"▌";color:var(--amber);animation:bl 1s steps(2) infinite}
   @keyframes bl{50%{opacity:0}}
+
+  /* 产物面板 */
+  .artifact{flex:1;min-height:0;display:flex;flex-direction:column;border-top:1px solid var(--line);background:var(--bg-2)}
+  .ahead{flex:none;display:flex;align-items:center;gap:2px;padding:10px 22px 0}
+  .tab{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+       color:var(--ink-3);padding:6px 12px;border-radius:6px 6px 0 0;cursor:pointer;transition:.2s}
+  .tab.on{color:var(--amber);background:var(--panel)}
+  .tab:hover{color:var(--ink-2)}
+  .ahead .sp{flex:1}
+  .ahead .cnt{font-family:var(--mono);font-size:10px;color:var(--ink-3);padding-bottom:6px}
+  .abody{flex:1;min-height:0;overflow:auto;background:var(--panel);border-top:1px solid var(--line);
+         font-family:var(--mono);font-size:11px;line-height:1.85;padding:12px 0}
+  .ln{display:flex;padding:0 22px;white-space:pre-wrap;word-break:break-word}
+  .ln .g{width:26px;flex:none;color:var(--ink-3);text-align:right;padding-right:14px;user-select:none}
+  .ln .t{flex:1;color:var(--ink-2)}
+  .ln.h .t{color:var(--ink);font-weight:600}
+  .ln.del{background:rgba(204,90,80,.10)}
+  .ln.del .t{color:#e08b83}
+  .ln.del .g{color:var(--red)}
+  .ln.add{background:rgba(77,169,126,.10)}
+  .ln.add .t{color:#8fd0b0}
+  .ln.add .g{color:var(--green)}
+  .ph{color:var(--ink-3);font-family:var(--mono);font-size:11px;padding:26px 22px;text-align:center}
+
+  /* 右栏 */
   .right{flex:1;overflow-y:auto}
-  .score{padding:18px 18px 16px;border-bottom:1px solid var(--line)}
-  .sv{font-family:var(--mono);font-size:44px;font-weight:600;line-height:1;letter-spacing:-.03em;
-      color:var(--ink);transition:color .3s}
-  .sv.low{color:var(--red)}
-  .sv.high{color:var(--green)}
-  .sv.pend{color:var(--ink-3)}
-  .smeta{display:flex;justify-content:space-between;margin-top:8px;font-family:var(--mono);
-         font-size:10.5px;color:var(--ink-3);letter-spacing:.06em}
-  .bar{height:3px;background:var(--line-2);border-radius:2px;margin-top:12px;overflow:hidden}
-  .bar i{display:block;height:100%;width:0;background:var(--amber);transition:width .5s,background .3s}
+  .score{padding:18px 18px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:18px}
+  .ring{width:86px;height:86px;flex:none;position:relative}
+  .ring svg{transform:rotate(-90deg)}
+  .ring .num{position:absolute;inset:0;display:grid;place-items:center;font-family:var(--mono);
+             font-size:24px;font-weight:600;letter-spacing:-.03em}
+  .sinfo{flex:1;min-width:0}
+  .sinfo .t{font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;color:var(--ink-3);text-transform:uppercase}
+  .sinfo .v{font-size:12.5px;font-weight:600;margin-top:6px;color:var(--ink-2)}
+  .sinfo .th{font-family:var(--mono);font-size:10.5px;color:var(--ink-3);margin-top:5px}
   .rules{padding:12px 18px;border-bottom:1px solid var(--line)}
-  .rrow{display:flex;justify-content:space-between;gap:10px;padding:5px 0;font-size:12px;color:var(--ink-2)}
+  .rrow{display:flex;justify-content:space-between;gap:10px;padding:6px 0;font-size:12px;color:var(--ink-2)}
   .rrow .rn{flex:1}
-  .rrow .rc{font-family:var(--mono);font-size:11px;color:var(--ink-3);flex:none}
+  .rrow .rc{font-family:var(--mono);font-size:10.5px;color:var(--ink-3);flex:none}
   .rrow.fail .rn,.rrow.fail .rc{color:var(--red)}
   .rrow.pass .rc{color:var(--green)}
-  .mem{display:flex;gap:10px;padding:9px 0;border-top:1px solid var(--line);align-items:flex-start}
+  .mem{display:flex;gap:11px;padding:10px 0;border-top:1px solid var(--line)}
   .mem:first-of-type{border-top:0}
-  .mem .ms{font-family:var(--mono);font-size:10px;color:var(--amber);flex:none;width:32px;padding-top:2px}
-  .mem .mt{font-size:12px;color:var(--ink-2);line-height:1.6}
-  .empty{font-size:11.5px;color:var(--ink-3);padding:10px 0;font-family:var(--mono)}
-  @media (max-width:1080px){
+  .mem .ms{font-family:var(--mono);font-size:9.5px;color:var(--amber);flex:none;width:26px;padding-top:3px}
+  .mem .mt{font-size:11.5px;color:var(--ink-2);line-height:1.65}
+  .empty{font-size:11px;color:var(--ink-3);padding:10px 0;font-family:var(--mono)}
+
+  @media (max-width:1120px){
     body{overflow:auto}
     .app{height:auto;min-height:100vh}
     .main{grid-template-columns:1fr}
     .col{border-right:0;border-bottom:1px solid var(--line)}
+    .steps{max-height:none}
+    .abody{max-height:340px}
   }
 </style>
 </head>
 <body>
 <div class="app">
+
   <div class="top">
     <div class="logo">
-      <span class="m">AF</span>
-      <span>AgentForge<small>PIPELINE CONSOLE</small></span>
+      <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
+        <defs>
+          <linearGradient id="mg" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#f0bd62"/><stop offset="1" stop-color="#cf9432"/>
+          </linearGradient>
+        </defs>
+        <rect width="32" height="32" rx="9" fill="url(#mg)"/>
+        <path d="M9.4 22.6 16 9.6l6.6 13" fill="none" stroke="#20160a" stroke-width="2.1"
+              stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M12.6 18.1h6.8" stroke="#20160a" stroke-width="2.1" stroke-linecap="round"/>
+        <circle cx="16" cy="9.6" r="2.5" fill="#20160a"/>
+        <circle cx="9.4" cy="22.6" r="2" fill="#20160a"/>
+        <circle cx="22.6" cy="22.6" r="2" fill="#20160a"/>
+      </svg>
+      <span><span class="nm">AgentForge</span><small class="sb">PIPELINE CONSOLE</small></span>
     </div>
     <div class="sp"></div>
     <div class="meta">
-      <span><i class="dot idle" id="statusDot"></i><b id="statusTxt">待机</b></span>
+      <span class="st" id="st"><i></i><b id="stTxt">待机</b></span>
       <span>RUN <b id="runId">—</b></span>
       <span>ELAPSED <b id="elapsed">0.0s</b></span>
     </div>
@@ -132,39 +201,66 @@
 
   <div class="main">
     <div class="col">
-      <div class="hd">输入 <em>Input</em></div>
+      <div class="cap">输入 <em>Input</em></div>
       <div class="pad">
         <div class="lab">任务描述</div>
         <textarea id="task">给电商后台做一个订单导出功能：支持按时间区间筛选，导出 CSV，超过一万行要分页写入，避免内存溢出。</textarea>
         <div class="lab">交付形态</div>
         <select id="profile">
-          <option value="be">后端接口（含表结构与校验）</option>
-          <option value="fe">前端页面（含交互与异常态）</option>
+          <option>后端接口（含表结构与校验）</option>
+          <option>前端页面（含交互与异常态）</option>
         </select>
         <div class="lab">质量门禁阈值</div>
-        <div class="rowv"><span>低于该分数触发重试</span><span id="thVal">60</span></div>
+        <div class="rowv"><span>低于该分数触发重试</span><b id="thVal">60</b></div>
         <input type="range" id="th" min="40" max="90" value="60" />
         <div class="btns">
           <button class="pri" id="btnRun">开始运行</button>
           <button id="btnReset" disabled>重置</button>
         </div>
+
+        <div class="tips">
+          <div class="tip-t">怎么试</div>
+          <div class="tip"><b>改任务描述</b>　右侧记忆召回会跟着变</div>
+          <div class="tip"><b>把阈值拖到 90</b>　第一轮 85 分也不放过，继续重试</div>
+          <div class="tip"><b>拖到 40</b>　一次通过，不触发重试</div>
+        </div>
       </div>
     </div>
 
     <div class="col">
-      <div class="hd">流水线 <em id="stepCount">0 / 5</em></div>
+      <div class="rail" id="rail"></div>
       <div class="steps" id="steps"></div>
+      <div class="artifact">
+        <div class="ahead">
+          <div class="tab on" data-tab="out">产物</div>
+          <div class="tab" data-tab="diff">差异</div>
+          <div class="sp"></div>
+          <div class="cnt" id="aCnt">—</div>
+        </div>
+        <div class="abody" id="abody"><div class="ph">运行后在这里查看产物</div></div>
+      </div>
     </div>
 
     <div class="col">
-      <div class="hd">质量门禁 <em>Gate</em></div>
+      <div class="cap">质量门禁 <em>Gate</em></div>
       <div class="score">
-        <div class="sv pend" id="score">—</div>
-        <div class="smeta"><span>THRESHOLD <b id="thShow">60</b></span><span id="verdict">未执行</span></div>
-        <div class="bar"><i id="scoreBar"></i></div>
+        <div class="ring">
+          <svg width="86" height="86">
+            <circle cx="43" cy="43" r="36" fill="none" stroke="#232a34" stroke-width="6"/>
+            <circle id="ringFg" cx="43" cy="43" r="36" fill="none" stroke="#5f6b7a" stroke-width="6"
+                    stroke-linecap="round" stroke-dasharray="226.2" stroke-dashoffset="226.2"
+                    style="transition:stroke-dashoffset .5s,stroke .3s"/>
+          </svg>
+          <div class="num" id="score">—</div>
+        </div>
+        <div class="sinfo">
+          <div class="t">Threshold <b id="thShow">60</b></div>
+          <div class="v" id="verdict">未执行</div>
+          <div class="th" id="attempts">attempt —</div>
+        </div>
       </div>
       <div class="rules" id="rules"><div class="empty">运行后显示扣分明细</div></div>
-      <div class="hd">记忆召回 <em id="memCount">0</em></div>
+      <div class="cap">记忆召回 <em id="memCount">0</em></div>
       <div class="rules" id="mems"><div class="empty">未命中</div></div>
     </div>
   </div>
@@ -173,245 +269,284 @@
 <script>
 (function(){
   "use strict";
-  var STEPS=[
-    {n:"Planner",t:"任务拆解"},
-    {n:"Architect",t:"方案与接口"},
-    {n:"Coding",t:"实现"},
-    {n:"Debug",t:"自检与修复"},
-    {n:"Deploy",t:"产物导出"}
-  ];
+  var STEPS=[{n:"Planner",t:"任务拆解"},{n:"Architect",t:"方案与接口"},{n:"Coding",t:"实现"},
+             {n:"Debug",t:"门禁与修复"},{n:"Deploy",t:"产物打包"}];
   var MEMORY=[
-    {k:["订单","导出","csv","分页"], t:"上次订单导出：用游标分页而非 LIMIT OFFSET，导出十万行内存稳定在 60MB 以内。"},
+    {k:["订单","导出","csv","分页"], t:"上次订单导出：用游标分页而非 LIMIT OFFSET，十万行内存稳定在 60MB 以内。"},
     {k:["导出","内存","溢出","流"], t:"流式写入的坑：先写文件头再逐页 flush，否则 CSV 会出现半个 BOM。"},
     {k:["时间","筛选","区间"], t:"时间区间筛选：前端传本地时区，后端统一转 UTC 再查，避免 8 小时偏移。"},
     {k:["校验","权限","后台","接口"], t:"导出类接口必须单独鉴权，不能复用列表接口的权限位。"},
     {k:["异常","重试","失败"], t:"长任务失败记录断点，重跑从断点继续，不要整单重来。"}
   ];
+  var NL=String.fromCharCode(10);
+  var FENCE=String.fromCharCode(96,96,96);
+  var C=13.2, D=226.2;
 
-  var NL = String.fromCharCode(10);
-  var BT3 = String.fromCharCode(96,96,96);
-
-  var OUT_1 = [
-    "## 方案",
-    "采用 Spring Boot 分页查询，按时间区间过滤订单，逐页写出 CSV。",
-    "",
-    BT3 + "java",
-    "public void export(LocalDateTime from, LocalDateTime to, Writer w) {",
-    "    int page = 0;",
-    "    while (true) {",
+  var OUT_1=["## 方案","采用 Spring Boot 分页查询，按时间区间过滤订单，逐页写出 CSV。","",
+    FENCE+"java","public void export(LocalDateTime from, LocalDateTime to, Writer w) {",
+    "    int page = 0;","    while (true) {",
     "        List<Order> list = repo.page(from, to, page++, 1000);",
     "        if (list.isEmpty()) break;",
-    "        for (Order o : list) w.write(o.toCsv());",
-    "    }",
-    "}"
-  ].join(NL);
+    "        for (Order o : list) w.write(o.toCsv());","    }","}"].join(NL);
 
-  var OUT_2 = [
-    "## 方案",
-    "采用 Spring Boot + 游标分页，按时间区间过滤订单，逐页流式写出 CSV，内存占用与总行数无关。",
-    "",
-    "## 接口",
-    "GET /api/orders/export 返回 text/csv，响应头带 Content-Disposition。导出口单独鉴权，不复用列表接口权限位。",
-    "",
-    "## 时间处理",
-    "前端传本地时区，后端统一转 UTC 后查询，避免时区偏移。",
-    "",
-    "## 实现",
-    BT3 + "java",
+  var OUT_2=["## 方案","采用 Spring Boot + 游标分页，按时间区间过滤订单，逐页流式写出 CSV，内存占用与总行数无关。","",
+    "## 接口","GET /api/orders/export 返回 text/csv，响应头带 Content-Disposition。导出口单独鉴权，不复用列表权限位。","",
+    "## 时间处理","前端传本地时区，后端统一转 UTC 后查询，避免时区偏移。","",
+    "## 实现",FENCE+"java",
     "public void export(LocalDateTime from, LocalDateTime to, Writer w) throws IOException {",
-    "    w.write(CSV_HEADER);",
-    "    long cursor = 0;",
-    "    while (true) {",
+    "    w.write(CSV_HEADER);","    long cursor = 0;","    while (true) {",
     "        List<Order> list = repo.next(from, to, cursor, 1000);",
     "        if (list.isEmpty()) break;",
     "        for (Order o : list) { w.write(o.toCsv()); cursor = o.getId(); }",
-    "        w.flush();",
-    "    }",
-    "}",
-    BT3,
-    "",
-    "## 边界",
-    "超过一万行分页写入并 flush；中途失败记录 cursor，重跑从断点继续。"
-  ].join(NL);
+    "        w.flush();","    }","}",FENCE,"","## 边界",
+    "超过一万行分页写入并 flush；中途失败记录 cursor，重跑从断点继续。"].join(NL);
 
   var $=function(id){return document.getElementById(id)};
-  var elSteps=$("steps"), elScore=$("score"), elBar=$("scoreBar"), elVerdict=$("verdict");
-  var elRules=$("rules"), elMems=$("mems"), elMemCount=$("memCount");
-  var elStatus=$("statusTxt"), elDot=$("statusDot"), elRun=$("runId"), elElapsed=$("elapsed");
-  var elTh=$("th"), elThVal=$("thVal"), elThShow=$("thShow");
-  var running=false, aborted=false, t0=0, timer=null;
+  var rail=$("rail"), stepsEl=$("steps"), abody=$("abody"), aCnt=$("aCnt");
+  var ringFg=$("ringFg"), scoreEl=$("score"), verdict=$("verdict"), attemptsEl=$("attempts");
+  var rulesEl=$("rules"), memsEl=$("mems"), memCount=$("memCount");
+  var stEl=$("st"), stTxt=$("stTxt"), runIdEl=$("runId"), elapsedEl=$("elapsed");
+  var thEl=$("th"), thVal=$("thVal"), thShow=$("thShow");
+  var running=false, aborted=false, t0=0, timer=null, curTab="out", outText="", diffData=null;
 
-  elTh.oninput=function(){ elThVal.textContent=elTh.value; elThShow.textContent=elTh.value; };
+  thEl.oninput=function(){ thVal.textContent=thEl.value; thShow.textContent=thEl.value; };
 
-  function sleep(ms){ return new Promise(function(r){ setTimeout(r,ms); }); }
+  function sleep(ms){ return new Promise(function(r){setTimeout(r,ms)}); }
   function now(){ return ((performance.now()-t0)/1000).toFixed(1)+"s"; }
-  function setStatus(t,c){ elStatus.textContent=t; elDot.className="dot "+(c||"idle"); }
+  function setSt(t,c){ stTxt.textContent=t; stEl.className="st "+(c||""); }
   function startTimer(){ t0=performance.now(); clearInterval(timer);
-    timer=setInterval(function(){ if(running) elElapsed.textContent=now(); },100); }
+    timer=setInterval(function(){ if(running) elapsedEl.textContent=now(); },100); }
+
+  /* 轨道 */
+  function buildRail(){
+    rail.innerHTML="";
+    STEPS.forEach(function(s,i){
+      var n=document.createElement("div");
+      n.className="rnode"; n.id="rn"+i;
+      n.innerHTML='<span class="rdot"></span><span class="rlabel">'+s.n+'</span>';
+      rail.appendChild(n);
+      if(i<STEPS.length-1){
+        var l=document.createElement("div");
+        l.className="rline"; l.id="rl"+i;
+        l.innerHTML="<i></i>";
+        rail.appendChild(l);
+      }
+    });
+  }
+  function railState(i,cls){
+    var n=$("rn"+i); if(!n) return;
+    n.classList.remove("act","ok"); if(cls) n.classList.add(cls);
+    if(cls==="ok" && $("rl"+i)) $("rl"+i).querySelector("i").style.width="100%";
+  }
 
   function buildSteps(){
-    elSteps.innerHTML="";
+    stepsEl.innerHTML="";
     STEPS.forEach(function(s,i){
       var d=document.createElement("div");
       d.className="step"; d.id="step"+i;
       d.innerHTML='<div class="srow"><span class="sdot"></span><span class="sn">'+("0"+(i+1)).slice(-2)+
         '</span><span class="sname">'+s.n+'</span><span class="stag">'+s.t+
-        '</span><span class="sbar"><i></i></span></div><div class="log" id="log'+i+'"></div>';
-      elSteps.appendChild(d);
+        '</span></div><div class="log" id="log'+i+'"></div>';
+      stepsEl.appendChild(d);
     });
-    $("stepCount").textContent="0 / "+STEPS.length;
   }
   function stepState(i,cls){
-    var el=$("step"+i);
-    el.classList.remove("act","ok","err");
-    if(cls) el.classList.add(cls);
-    $("stepCount").textContent=document.querySelectorAll(".step.ok,.step.err").length+" / "+STEPS.length;
+    var el=$("step"+i); if(!el) return;
+    el.classList.remove("act","ok"); if(cls) el.classList.add(cls);
   }
-  function progress(i,pct){ $("step"+i).querySelector(".sbar i").style.width=pct+"%"; }
-
-  async function typeLog(i, lines, speed){
+  async function typeLog(i,lines,speed){
     var box=$("log"+i);
     for(var k=0;k<lines.length;k++){
       if(aborted) return;
       var d=document.createElement("div");
-      d.className="cursor"; d.innerHTML=lines[k];
+      d.className="cur"; d.innerHTML=lines[k];
       box.appendChild(d); box.scrollTop=box.scrollHeight;
-      await sleep(speed||220);
-      d.classList.remove("cursor");
+      await sleep(speed||200);
+      d.classList.remove("cur");
     }
   }
 
+  /* 差异（LCS） */
+  function diff(a,b){
+    var A=a.split(NL), B=b.split(NL), n=A.length, m=B.length, i, j;
+    var L=[]; for(i=0;i<=n;i++){ L.push(new Array(m+1).fill(0)); }
+    for(i=n-1;i>=0;i--) for(j=m-1;j>=0;j--)
+      L[i][j] = A[i]===B[j] ? L[i+1][j+1]+1 : Math.max(L[i+1][j], L[i][j+1]);
+    var out=[], x=0, y=0;
+    while(x<n && y<m){
+      if(A[x]===B[y]){ out.push({t:" ",s:A[x]}); x++; y++; }
+      else if(L[x+1][y] >= L[x][y+1]){ out.push({t:"-",s:A[x]}); x++; }
+      else { out.push({t:"+",s:B[y]}); y++; }
+    }
+    while(x<n){ out.push({t:"-",s:A[x++]}); }
+    while(y<m){ out.push({t:"+",s:B[y++]}); }
+    return out;
+  }
+
+  function esc(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
+  function renderOut(text){
+    outText=text;
+    if(curTab!=="out") return;
+    var lines=text.split(NL), h="";
+    for(var i=0;i<lines.length;i++){
+      var cls = /^##/.test(lines[i]) ? "ln h" : "ln";
+      h += '<div class="'+cls+'"><span class="g">'+(" "+(i+1)).slice(-2)+'</span><span class="t">'+esc(lines[i])+'</span></div>';
+    }
+    abody.innerHTML=h;
+    aCnt.textContent=lines.length+" 行 · 产物";
+  }
+  function renderDiff(){
+    if(!diffData) return;
+    if(curTab!=="diff") return;
+    var add=0, del=0, h="";
+    diffData.forEach(function(d){
+      if(d.t==="+") add++; if(d.t==="-") del++;
+      var cls = d.t==="+" ? "ln add" : (d.t==="-" ? "ln del" : "ln");
+      var g = d.t===" " ? " " : d.t;
+      h += '<div class="'+cls+'"><span class="g">'+g+'</span><span class="t">'+esc(d.s)+'</span></div>';
+    });
+    abody.innerHTML=h;
+    aCnt.textContent="+"+add+" / -"+del+" 行";
+  }
+
+  document.querySelectorAll(".tab").forEach(function(t){
+    t.onclick=function(){
+      document.querySelectorAll(".tab").forEach(function(x){x.classList.remove("on")});
+      t.classList.add("on"); curTab=t.dataset.tab;
+      if(curTab==="out") renderOut(outText); else renderDiff();
+    };
+  });
+
   function recall(text){
     var q=text.toLowerCase(), hits=[];
-    MEMORY.forEach(function(m){
-      var sc=0;
-      m.k.forEach(function(kw){ if(q.indexOf(kw.toLowerCase())>=0) sc++; });
-      if(sc>0) hits.push({t:m.t,s:sc});
-    });
+    MEMORY.forEach(function(m){ var s=0;
+      m.k.forEach(function(kw){ if(q.indexOf(kw.toLowerCase())>=0) s++; });
+      if(s>0) hits.push({t:m.t,s:s}); });
     hits.sort(function(a,b){return b.s-a.s});
     return hits.slice(0,3);
   }
   function renderMem(hits){
-    elMemCount.textContent=hits.length;
-    if(!hits.length){ elMems.innerHTML='<div class="empty">未命中</div>'; return; }
-    elMems.innerHTML=hits.map(function(h){
-      return '<div class="mem"><span class="ms">'+h.s.toFixed(1)+'</span><span class="mt">'+h.t+'</span></div>';
-    }).join("");
+    memCount.textContent=hits.length;
+    memsEl.innerHTML = hits.length
+      ? hits.map(function(h){ return '<div class="mem"><span class="ms">'+h.s.toFixed(1)+'</span><span class="mt">'+h.t+'</span></div>'; }).join("")
+      : '<div class="empty">未命中</div>';
   }
 
-  function judge(out, threshold){
+  function judge(out, th){
     var R=[];
-    var fences=(out.match(new RegExp(BT3,"g"))||[]).length;
-    R.push({n:"代码块闭合",pass:fences>0&&fences%2===0,d:(fences>0&&fences%2===0)?0:-25,
-            m:fences>0?(fences%2===0?"成对":"未闭合"):"缺失"});
-    var heads=(out.match(/(^|\n)##\s/g)||[]).length;
-    R.push({n:"章节完整度",pass:heads>=3,d:heads>=3?0:-20,m:heads+" 节"});
+    var f=(out.match(new RegExp(FENCE,"g"))||[]).length;
+    R.push({n:"代码块闭合", ok:f>0&&f%2===0, d:(f>0&&f%2===0)?0:-25, m:f>0?(f%2===0?"成对":"未闭合"):"缺失"});
+    var hd=(out.match(/(^|\n)##\s/g)||[]).length;
+    R.push({n:"章节完整度", ok:hd>=3, d:hd>=3?0:-20, m:hd+" 节"});
     var zh=(out.match(/[\u4e00-\u9fa5]/g)||[]).length;
-    var ratio=zh/Math.max(out.length,1);
-    R.push({n:"中英文比例",pass:ratio>=0.25,d:ratio>=0.25?0:-15,m:Math.round(ratio*100)+"%"});
-    R.push({n:"长度充足",pass:out.length>=420,d:out.length>=420?0:-10,m:out.length+" 字"});
-    var hasEdge=/边界|超时|失败|异常|断点/.test(out);
-    R.push({n:"含边界说明",pass:hasEdge,d:hasEdge?0:-10,m:hasEdge?"有":"无"});
+    var rt=zh/Math.max(out.length,1);
+    R.push({n:"中英文比例", ok:rt>=0.25, d:rt>=0.25?0:-15, m:Math.round(rt*100)+"%"});
+    R.push({n:"长度充足", ok:out.length>=420, d:out.length>=420?0:-10, m:out.length+" 字"});
+    var eg=/边界|超时|失败|异常|断点/.test(out);
+    R.push({n:"含边界说明", ok:eg, d:eg?0:-10, m:eg?"有":"无"});
 
-    var score=100;
-    R.forEach(function(r){ score+=r.d; });
-    score=Math.max(0,score);
+    var sc=100; R.forEach(function(r){ sc+=r.d; }); sc=Math.max(0,sc);
 
-    elScore.textContent=score;
-    elScore.className="sv "+(score>=threshold?"high":"low");
-    elBar.style.width=score+"%";
-    elBar.style.background=score>=threshold?"var(--green)":"var(--red)";
-    elVerdict.textContent=score>=threshold?"通过":"未通过 · 触发重试";
-    elRules.innerHTML=R.map(function(r){
-      return '<div class="rrow '+(r.pass?"pass":"fail")+'"><span class="rn">'+r.n+'</span>'+
+    scoreEl.textContent=sc;
+    scoreEl.style.color = sc>=th ? "var(--green)" : "var(--red)";
+    ringFg.style.strokeDashoffset = D - D*sc/100;
+    ringFg.style.stroke = sc>=th ? "var(--green)" : "var(--red)";
+    verdict.textContent = sc>=th ? "通过" : "未通过 · 触发重试";
+    verdict.style.color = sc>=th ? "var(--green)" : "var(--red)";
+    rulesEl.innerHTML=R.map(function(r){
+      return '<div class="rrow '+(r.ok?"pass":"fail")+'"><span class="rn">'+r.n+'</span>'+
              '<span class="rc">'+r.m+'　'+(r.d===0?"—":r.d)+'</span></div>';
     }).join("");
-    return score;
+    return sc;
   }
 
   async function run(){
     if(running) return;
-    running=true; aborted=false;
-    elRun.textContent=String(Math.floor(Math.random()*9000+1000));
-    setStatus("运行中","run"); startTimer();
+    running=true; aborted=false; diffData=null; outText="";
+    runIdEl.textContent=String(Math.floor(Math.random()*9000+1000));
+    setSt("运行中","on"); startTimer();
     $("btnRun").disabled=true; $("btnReset").disabled=true;
-    buildSteps(); elScore.textContent="—"; elScore.className="sv pend"; elBar.style.width="0";
-    elVerdict.textContent="未执行"; elRules.innerHTML='<div class="empty">运行后显示扣分明细</div>';
+    buildRail(); buildSteps();
+    scoreEl.textContent="—"; scoreEl.style.color="var(--ink-3)";
+    ringFg.style.strokeDashoffset=D; verdict.textContent="未执行"; verdict.style.color="var(--ink-2)";
+    attemptsEl.textContent="attempt —";
+    rulesEl.innerHTML='<div class="empty">运行后显示扣分明细</div>';
+    abody.innerHTML='<div class="ph">运行后在这里查看产物</div>'; aCnt.textContent="—";
+    curTab="out"; document.querySelectorAll(".tab").forEach(function(x){x.classList.toggle("on",x.dataset.tab==="out")});
 
     var task=$("task").value, hits=recall(task);
     renderMem(hits);
 
-    stepState(0,"act"); progress(0,30);
-    await typeLog(0,[
-      '<span class="k">input</span>  '+task.slice(0,30)+'…',
+    railState(0,"act"); stepState(0,"act");
+    await typeLog(0,['<span class="k">input</span>  '+task.slice(0,28)+'…',
       '拆解为 4 个可交付项：接口契约 / 分页策略 / 时间处理 / 异常边界',
-      '<span class="g">done</span>  4 项，预计改动 3 个文件'
-    ],260); if(aborted) return;
-    progress(0,100); stepState(0,"ok");
+      '<span class="g">done</span>  4 项 · 预计改动 3 个文件'],220);
+    if(aborted) return; railState(0,"ok"); stepState(0,"ok");
 
-    stepState(1,"act"); progress(1,35);
-    var memLine = hits.length
-      ? '<span class="a">recall</span>  命中 '+hits.length+' 条经验（最高分 '+hits[0].s.toFixed(1)+'）'
-      : '<span class="r">recall</span>  未命中历史经验，按默认策略生成';
+    railState(1,"act"); stepState(1,"act");
     await typeLog(1,[
-      memLine,
+      hits.length ? '<span class="a">recall</span>  命中 '+hits.length+' 条经验（最高 '+hits[0].s.toFixed(1)+'）'
+                  : '<span class="r">recall</span>  未命中历史经验，按默认策略生成',
       '契约：GET /api/orders/export  →  text/csv',
-      '<span class="k">note</span>  导出类接口单独鉴权，不复用列表权限位'
-    ],240); if(aborted) return;
-    progress(1,100); stepState(1,"ok");
+      '<span class="k">note</span>  导出类接口单独鉴权'],200);
+    if(aborted) return; railState(1,"ok"); stepState(1,"ok");
 
-    stepState(2,"act"); progress(2,25);
-    await typeLog(2,[
-      '<span class="k">write</span>  OrderExportController.java',
-      '<span class="k">write</span>  OrderExportService.java',
-      '生成中……'
-    ],300); if(aborted) return;
-    progress(2,100); stepState(2,"ok");
-
-    stepState(3,"act"); progress(3,40);
-    await typeLog(3,['<span class="k">gate</span>  第 1 轮产物校验中……'],260);
+    railState(2,"act"); stepState(2,"act");
+    await typeLog(2,['<span class="k">write</span>  OrderExportController.java',
+      '<span class="k">write</span>  OrderExportService.java'],240);
     if(aborted) return;
-    var th=+elTh.value;
-    var s1=judge(OUT_1,th);
-    progress(3,70);
+    renderOut(OUT_1); railState(2,"ok"); stepState(2,"ok");
+
+    railState(3,"act"); stepState(3,"act");
+    await typeLog(3,['<span class="k">gate</span>  第 1 轮产物校验'],200);
+    if(aborted) return;
+    var th=+thEl.value, s1=judge(OUT_1,th);
+    attemptsEl.textContent="attempt 1 / 2";
+
     if(s1<th){
-      await typeLog(3,[
-        '<span class="r">fail</span>  得分 '+s1+' 低于阈值 '+th+'，带修复指令重试',
-        '<span class="k">fix</span>   补全代码块闭合 / 增加章节 / 补边界说明'
-      ],320); if(aborted) return;
-      await sleep(400);
+      await typeLog(3,['<span class="r">fail</span>  得分 '+s1+' 低于阈值 '+th+'，带修复指令重试',
+        '<span class="k">fix</span>   补全代码块闭合 / 增加章节 / 补边界说明'],260);
+      if(aborted) return;
+      await sleep(320);
       var s2=judge(OUT_2,th);
-      await typeLog(3,['<span class="g">pass</span>  第 2 轮得分 '+s2+'，通过门禁'],300);
+      attemptsEl.textContent="attempt 2 / 2";
+      diffData=diff(OUT_1,OUT_2);
+      renderOut(OUT_2);
+      document.querySelectorAll(".tab").forEach(function(x){x.classList.toggle("on",x.dataset.tab==="diff")});
+      curTab="diff"; renderDiff();
+      await typeLog(3,['<span class="g">pass</span>  第 2 轮得分 '+s2+'，通过门禁','<span class="k">view</span>  已切到「差异」，可逐行查看改动'],240);
       if(aborted) return;
     }else{
-      await typeLog(3,['<span class="g">pass</span>  得分 '+s1+'，一次通过'],300);
+      await typeLog(3,['<span class="g">pass</span>  得分 '+s1+'，一次通过'],240);
     }
-    progress(3,100); stepState(3,"ok");
+    railState(3,"ok"); stepState(3,"ok");
 
-    stepState(4,"act"); progress(4,50);
-    await typeLog(4,[
-      '<span class="k">pack</span>  ARCHITECTURE.md · API.md · CHANGELOG.md',
-      '<span class="g">ok</span>    产物已就绪，可导出'
-    ],240); if(aborted) return;
-    progress(4,100); stepState(4,"ok");
+    railState(4,"act"); stepState(4,"act");
+    await typeLog(4,['<span class="k">pack</span>  ARCHITECTURE.md · API.md · CHANGELOG.md',
+      '<span class="g">ok</span>    产物已就绪'],200);
+    if(aborted) return; railState(4,"ok"); stepState(4,"ok");
 
-    running=false; setStatus("已完成","");
-    clearInterval(timer); elElapsed.textContent=now();
+    running=false; setSt("已完成","ok"); clearInterval(timer); elapsedEl.textContent=now();
     $("btnRun").disabled=false; $("btnReset").disabled=false;
   }
 
   $("btnRun").onclick=run;
   $("btnReset").onclick=function(){
     aborted=true; running=false; clearInterval(timer);
-    buildSteps(); elScore.textContent="—"; elScore.className="sv pend";
-    elBar.style.width="0"; elVerdict.textContent="未执行";
-    elRules.innerHTML='<div class="empty">运行后显示扣分明细</div>';
-    elMems.innerHTML='<div class="empty">未命中</div>'; elMemCount.textContent="0";
-    setStatus("待机","idle"); elElapsed.textContent="0.0s"; elRun.textContent="—";
+    buildRail(); buildSteps();
+    scoreEl.textContent="—"; scoreEl.style.color="var(--ink-3)";
+    ringFg.style.strokeDashoffset=D; ringFg.style.stroke="#5f6b7a";
+    verdict.textContent="未执行"; verdict.style.color="var(--ink-2)";
+    attemptsEl.textContent="attempt —";
+    rulesEl.innerHTML='<div class="empty">运行后显示扣分明细</div>';
+    memsEl.innerHTML='<div class="empty">未命中</div>'; memCount.textContent="0";
+    abody.innerHTML='<div class="ph">运行后在这里查看产物</div>'; aCnt.textContent="—";
+    setSt("待机",""); elapsedEl.textContent="0.0s"; runIdEl.textContent="—";
     $("btnRun").disabled=false; $("btnReset").disabled=true;
   };
 
-  buildSteps(); setStatus("待机","idle");
+  buildRail(); buildSteps(); setSt("待机","");
 })();
 </script>
 </body></html>
